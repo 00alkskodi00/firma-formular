@@ -17,9 +17,13 @@
   .firma { font-size: 13px; color: var(--muted); line-height: 1.4; }
   .firma b { color: var(--text); font-size: 15px; }
   .req { color: var(--warn); }
+  .item-head { display: flex; gap: 12px; align-items: flex-start; }
+  .item-head .txt { flex: 1; }
+  .item-img { max-width: 160px; max-height: 120px; border-radius: 8px; object-fit: contain; cursor: zoom-in; }
   .opt { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #d5dbe3; border-radius: 10px; margin-top: 8px; cursor: pointer; }
   .opt:hover { border-color: var(--p); }
   .opt input { width: 20px; height: 20px; flex: none; }
+  .opt img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex: none; cursor: zoom-in; }
   .opt.sel { border-color: var(--ok); background: #eef8ef; }
   .opt.sel.rq { border-color: var(--warn); background: #fff4ea; }
   textarea, input[type=text] { width: 100%; padding: 10px 12px; border: 1px solid #d5dbe3; border-radius: 10px; font: inherit; margin-top: 8px; }
@@ -30,24 +34,27 @@
   .btn.ghost { background: #eef2f7; color: var(--text); }
   .btn.file { background: #e8f0fb; color: var(--p); padding: 10px 14px; margin: 6px 6px 0 0; }
   .btn:disabled { opacity: .6; cursor: default; }
+  .link { background: none; border: 0; color: var(--p); font: inherit; font-size: 13px; cursor: pointer; padding: 6px 0; text-decoration: underline; }
   .sig { border: 1px solid #9aa5b1; border-radius: 10px; background: #fff; touch-action: none; width: 100%; height: 180px; display: block; }
   .err { color: #b00020; font-size: 14px; margin-top: 8px; }
   .status { padding: 10px 12px; border-radius: 10px; font-size: 14px; margin-bottom: 12px; }
-  .status.ok { background: #e6f4ea; color: #1b5e20; }
   .status.warn { background: #fff3e0; color: #e65100; }
-  .status.info { background: #e8f0fb; color: #1b4f8a; }
   .center { text-align: center; padding: 40px 16px; }
   .big { font-size: 48px; }
   .done-item { padding: 8px 0; border-bottom: 1px solid #eef0f3; font-size: 14px; }
   .done-item b { display: block; }
   .hidden { display: none; }
   .sprava { white-space: pre-wrap; background: #f7f9fc; border-radius: 10px; padding: 10px 12px; margin-top: 8px; font-size: 14px; }
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; padding: 16px; }
+  .overlay img { max-width: 100%; max-height: 100%; }
+  .overlay.show { display: flex; }
 </style>
 </head>
 <body>
 <div class="wrap" id="app">
   <div class="card center"><div class="muted">Načítavam…</div></div>
 </div>
+<div class="overlay" id="overlay" onclick="this.classList.remove('show')"><img id="overlayImg" alt=""></div>
 <script>
 (function () {
   // Adresu Supabase a verejný (anon) kľúč doplní scripts/publish_formular.ps1 z .env.
@@ -61,6 +68,8 @@
   var odp = { cp: null, projekt: null, body: {} };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function img(b64, cls) { if (!b64 || !/^[A-Za-z0-9+\/=\s]+$/.test(b64)) return ''; return '<img class="' + esc(cls) + '" src="data:image/*;base64,' + b64.replace(/\s/g, '') + '" alt="" onclick="showImg(this.src); event.preventDefault();">'; }
+  window.showImg = function (src) { document.getElementById('overlayImg').src = src; document.getElementById('overlay').classList.add('show'); };
   function rpc(fn, body) {
     return fetch(SB_URL + '/rest/v1/rpc/' + fn, {
       method: 'POST',
@@ -137,14 +146,44 @@
     return html;
   }
 
+  function bodOdp(id) {
+    if (!odp.body[id]) odp.body[id] = { potvrdene: null, vybrane: [], anoNie: null, text: '', poziadavka: '' };
+    var o = odp.body[id];
+    o.vybrane = o.vybrane || []; o.text = o.text || ''; o.poziadavka = o.poziadavka || '';
+    if (o.potvrdene === undefined) o.potvrdene = null;
+    if (o.anoNie === undefined) o.anoNie = null;
+    return o;
+  }
+
   function bodHtml(b, i) {
     var id = String(b.id);
-    var o = odp.body[id] || { potvrdene: null, poziadavka: '' };
-    var html = '<div class="card" id="bod-' + i + '"><h2>' + (i + 1) + '. ' + esc(b.nazov) + ' <span class="req">*</span></h2>';
+    var o = bodOdp(id);
+    var typ = b.typ || 'potvrdenie';
+    var html = '<div class="card" id="bod-' + i + '"><div class="item-head"><div class="txt"><h2>' + (i + 1) + '. ' + esc(b.nazov) + (b.povinne === false ? '' : ' <span class="req">*</span>') + '</h2>';
     if (b.poznamka) html += '<div class="muted">' + esc(b.poznamka) + '</div>';
-    html += '<label class="opt' + (o.potvrdene === true ? ' sel' : '') + '"><input type="radio" name="b-' + id + '" data-b="' + id + '" data-v="ano"' + (o.potvrdene === true ? ' checked' : '') + '><span>Potvrdzujem</span></label>';
-    html += '<label class="opt' + (o.potvrdene === false ? ' sel rq' : '') + '"><input type="radio" name="b-' + id + '" data-b="' + id + '" data-v="nie"' + (o.potvrdene === false ? ' checked' : '') + '><span>Mám požiadavku / inak</span></label>';
-    html += '<div id="rqb-' + id + '" class="' + (o.potvrdene === false ? '' : 'hidden') + '"><label class="small">Napíšte vašu požiadavku <span class="req">*</span></label><textarea data-b="' + id + '" data-t="rq" placeholder="Vaša požiadavka">' + esc(o.poziadavka || '') + '</textarea></div>';
+    html += '</div>' + img(b.obrazok, 'item-img') + '</div>';
+    if (typ === 'potvrdenie') {
+      html += '<label class="opt' + (o.potvrdene === true ? ' sel' : '') + '"><input type="radio" name="b-' + id + '" data-b="' + id + '" data-v="ano"' + (o.potvrdene === true ? ' checked' : '') + '><span>Potvrdzujem</span></label>';
+      html += '<label class="opt' + (o.potvrdene === false ? ' sel rq' : '') + '"><input type="radio" name="b-' + id + '" data-b="' + id + '" data-v="nie"' + (o.potvrdene === false ? ' checked' : '') + '><span>Mám požiadavku / inak</span></label>';
+      html += '<div id="rqb-' + id + '" class="' + (o.potvrdene === false ? '' : 'hidden') + '"><label class="small">Napíšte vašu požiadavku <span class="req">*</span></label><textarea data-b="' + id + '" data-t="rq" placeholder="Vaša požiadavka">' + esc(o.poziadavka) + '</textarea></div>';
+    } else {
+      if (typ === 'vyber' || typ === 'viacVyber') {
+        var type = typ === 'vyber' ? 'radio' : 'checkbox';
+        (b.moznosti || []).forEach(function (m) {
+          var checked = o.vybrane.indexOf(String(m.id)) >= 0;
+          html += '<label class="opt' + (checked ? ' sel' : '') + '"><input type="' + type + '" name="b-' + id + '" value="' + esc(m.id) + '"' + (checked ? ' checked' : '') + ' data-b="' + id + '" data-m="' + esc(m.id) + '" data-t="' + esc(typ) + '">' + img(m.obrazok, '') + '<span>' + esc(m.nazov) + '</span></label>';
+        });
+        html += '<div class="muted" style="margin-top:6px;font-size:12px">' + (typ === 'vyber' ? 'Vyberte jednu možnosť.' : 'Môžete vybrať viac možností.') + '</div>';
+      } else if (typ === 'anoNie') {
+        html += '<label class="opt' + (o.anoNie === true ? ' sel' : '') + '"><input type="radio" name="b-' + id + '" data-b="' + id + '" data-t="ano"' + (o.anoNie === true ? ' checked' : '') + '><span>Áno</span></label>';
+        html += '<label class="opt' + (o.anoNie === false ? ' sel' : '') + '"><input type="radio" name="b-' + id + '" data-b="' + id + '" data-t="nie"' + (o.anoNie === false ? ' checked' : '') + '><span>Nie</span></label>';
+      } else {
+        html += '<textarea data-b="' + id + '" data-t="text" placeholder="Vaša odpoveď">' + esc(o.text) + '</textarea>';
+      }
+      var open = !!o.poziadavka;
+      html += '<button type="button" class="link" data-toggle="' + id + '">' + (open ? 'Skryť požiadavku' : 'Mám k tomu požiadavku / poznámku') + '</button>';
+      html += '<div id="rqb-' + id + '" class="' + (open ? '' : 'hidden') + '"><textarea data-b="' + id + '" data-t="rq" placeholder="Napíšte, čo chcete inak alebo doplniť – firma vám to potvrdí">' + esc(o.poziadavka) + '</textarea></div>';
+    }
     html += '<div class="err" id="errb-' + id + '"></div></div>';
     return html;
   }
@@ -154,7 +193,7 @@
     if (balik.stav === 'vratene' && balik.komentar_firmy) {
       html += '<div class="card"><div class="status warn"><b>Firma vám balík vrátila s komentárom:</b><br>' + esc(balik.komentar_firmy).replace(/\n/g, '<br>') + '</div><div class="muted">Prosíme, prezrite si upravené položky a odošlite schválenie znova.</div></div>';
     }
-    html += '<div class="card"><div class="muted">Prosíme, prezrite si priložené dokumenty, pri každej položke označte „Schvaľujem“ alebo napíšte požiadavku, podpíšte sa a stlačte „Odoslať“. Položky označené <span class="req">*</span> sú povinné.</div></div>';
+    html += '<div class="card"><div class="muted">Prosíme, prezrite si priložené dokumenty, odpovedzte na každú položku (alebo napíšte požiadavku), podpíšte sa a stlačte „Odoslať“. Položky označené <span class="req">*</span> sú povinné.</div></div>';
     if (data.cp) html += sekciaHtml('cp', (data.cp.nazov || 'Cenová ponuka'), 'Otvorte si cenovú ponuku a potvrďte, či s ňou súhlasíte.');
     if (data.projekt) html += sekciaHtml('projekt', (data.projekt.nazov || 'Projekt'), 'Otvorte si projekt (výkresy, vizualizácie) a potvrďte, či s ním súhlasíte.');
     (data.body || []).forEach(function (b, i) { html += bodHtml(b, i); });
@@ -167,6 +206,15 @@
     html += '<div style="margin-top:14px"><button class="btn primary" type="button" id="submit">Odoslať schválenie</button></div></div>';
     app.innerHTML = html;
 
+    app.addEventListener('click', function (e) {
+      var t = e.target;
+      if (t && t.dataset && t.dataset.toggle) {
+        var box = document.getElementById('rqb-' + t.dataset.toggle);
+        var open = box.classList.toggle('hidden');
+        t.textContent = open ? 'Mám k tomu požiadavku / poznámku' : 'Skryť požiadavku';
+        if (open) { var ta = box.querySelector('textarea'); if (ta) { ta.value = ''; bodOdp(t.dataset.toggle).poziadavka = ''; } }
+      }
+    });
     app.addEventListener('change', function (e) {
       var t = e.target; if (!t || !t.dataset) return;
       if (t.dataset.s && t.type === 'radio') {
@@ -175,13 +223,18 @@
         document.getElementById('rq-' + t.dataset.s).classList.toggle('hidden', o.schvalene);
         if (o.schvalene) { o.poziadavka = ''; var ta = app.querySelector('textarea[data-s="' + t.dataset.s + '"]'); if (ta) ta.value = ''; }
       }
-      if (t.dataset.b && t.type === 'radio') {
-        var ob = odp.body[t.dataset.b] || (odp.body[t.dataset.b] = { potvrdene: null, poziadavka: '' });
-        ob.potvrdene = t.dataset.v === 'ano';
-        document.getElementById('rqb-' + t.dataset.b).classList.toggle('hidden', ob.potvrdene);
-        if (ob.potvrdene) { ob.poziadavka = ''; var tb = app.querySelector('textarea[data-b="' + t.dataset.b + '"]'); if (tb) tb.value = ''; }
+      if (t.dataset.b && (t.type === 'radio' || t.type === 'checkbox')) {
+        var ob = bodOdp(t.dataset.b);
+        if (t.dataset.v) {
+          ob.potvrdene = t.dataset.v === 'ano';
+          document.getElementById('rqb-' + t.dataset.b).classList.toggle('hidden', ob.potvrdene);
+          if (ob.potvrdene) { ob.poziadavka = ''; var tb = app.querySelector('textarea[data-b="' + t.dataset.b + '"][data-t="rq"]'); if (tb) tb.value = ''; }
+        } else if (t.dataset.t === 'vyber') { ob.vybrane = [t.dataset.m]; }
+        else if (t.dataset.t === 'viacVyber') { if (t.checked) { if (ob.vybrane.indexOf(t.dataset.m) < 0) ob.vybrane.push(t.dataset.m); } else { ob.vybrane = ob.vybrane.filter(function (x) { return x !== t.dataset.m; }); } }
+        else if (t.dataset.t === 'ano') { ob.anoNie = true; }
+        else if (t.dataset.t === 'nie') { ob.anoNie = false; }
       }
-      if (t.type === 'radio' && t.name) {
+      if ((t.type === 'radio' || t.type === 'checkbox') && t.name) {
         Array.prototype.forEach.call(app.querySelectorAll('input[name="' + t.name + '"]'), function (inp) {
           inp.parentNode.classList.toggle('sel', inp.checked);
           inp.parentNode.classList.toggle('rq', inp.checked && inp.dataset.v === 'nie');
@@ -189,9 +242,10 @@
       }
     });
     app.addEventListener('input', function (e) {
-      var t = e.target; if (!t || !t.dataset || t.dataset.t !== 'rq') return;
-      if (t.dataset.s) { (odp[t.dataset.s] || (odp[t.dataset.s] = { schvalene: false, poziadavka: '' })).poziadavka = t.value; }
-      if (t.dataset.b) { (odp.body[t.dataset.b] || (odp.body[t.dataset.b] = { potvrdene: false, poziadavka: '' })).poziadavka = t.value; }
+      var t = e.target; if (!t || !t.dataset) return;
+      if (t.dataset.t === 'rq' && t.dataset.s) { (odp[t.dataset.s] || (odp[t.dataset.s] = { schvalene: false, poziadavka: '' })).poziadavka = t.value; }
+      if (t.dataset.b && t.dataset.t === 'rq') { bodOdp(t.dataset.b).poziadavka = t.value; }
+      if (t.dataset.b && t.dataset.t === 'text') { bodOdp(t.dataset.b).text = t.value; }
     });
     setupSignature();
     document.getElementById('submit').addEventListener('click', submit);
@@ -216,6 +270,14 @@
     document.getElementById('clearSig').onclick = function () { hasSig = false; setupSignature(); };
   }
 
+  function zodpovedany(b, o) {
+    var typ = b.typ || 'potvrdenie';
+    if (typ === 'potvrdenie') return o.potvrdene === true;
+    if (typ === 'anoNie') return o.anoNie === true || o.anoNie === false;
+    if (typ === 'vyber' || typ === 'viacVyber') return (o.vybrane || []).length > 0;
+    return !!(o.text || '').trim();
+  }
+
   function validate() {
     var ok = true, first = null;
     function fail(elId, errId, msg) { var e = document.getElementById(errId); if (e) e.textContent = msg; if (!first) first = document.getElementById(elId); ok = false; }
@@ -228,9 +290,14 @@
       clear('err-' + k);
     });
     (data.body || []).forEach(function (b, i) {
-      var id = String(b.id), o = odp.body[id];
-      if (!o || o.potvrdene === null || o.potvrdene === undefined) return fail('bod-' + i, 'errb-' + id, 'Označte „Potvrdzujem“ alebo napíšte požiadavku.');
-      if (o.potvrdene === false && !(o.poziadavka || '').trim()) return fail('bod-' + i, 'errb-' + id, 'Napíšte, prosím, vašu požiadavku.');
+      var id = String(b.id), o = bodOdp(id), typ = b.typ || 'potvrdenie';
+      var maRq = !!(o.poziadavka || '').trim();
+      if (typ === 'potvrdenie') {
+        if (o.potvrdene === null) return fail('bod-' + i, 'errb-' + id, 'Označte „Potvrdzujem“ alebo napíšte požiadavku.');
+        if (o.potvrdene === false && !maRq) return fail('bod-' + i, 'errb-' + id, 'Napíšte, prosím, vašu požiadavku.');
+      } else if (b.povinne !== false && !zodpovedany(b, o) && !maRq) {
+        return fail('bod-' + i, 'errb-' + id, 'Táto položka je povinná – odpovedzte alebo napíšte požiadavku.');
+      }
       clear('errb-' + id);
     });
     var fin = document.getElementById('err-final');
@@ -265,15 +332,23 @@
       });
   }
 
+  function odpovedText(b, o) {
+    var typ = b.typ || 'potvrdenie';
+    if (typ === 'potvrdenie') return o.potvrdene === true ? 'potvrdené' : '';
+    if (typ === 'anoNie') return o.anoNie === true ? 'Áno' : (o.anoNie === false ? 'Nie' : '');
+    if (typ === 'vyber' || typ === 'viacVyber') return (b.moznosti || []).filter(function (m) { return (o.vybrane || []).indexOf(String(m.id)) >= 0; }).map(function (m) { return m.nazov; }).join(', ');
+    return o.text || '';
+  }
+
   function zhrnutie() {
     var o = balik.odpovede || {};
     var html = '<div class="card"><h2>Zhrnutie</h2>';
-    function riadok(nazov, schv, rq) {
-      return '<div class="done-item"><b>' + esc(nazov) + '</b>' + (schv ? '✅ schválené' : '✋ požiadavka') + (rq ? '<div class="muted">' + esc(rq) + '</div>' : '') + '</div>';
+    function riadok(nazov, text, rq) {
+      return '<div class="done-item"><b>' + esc(nazov) + '</b>' + (text ? '✅ ' + esc(text) : (rq ? '✋ požiadavka' : '–')) + (rq ? '<div class="muted">' + esc(rq) + '</div>' : '') + '</div>';
     }
-    if (data.cp && o.cp) html += riadok(data.cp.nazov || 'Cenová ponuka', o.cp.schvalene === true, o.cp.poziadavka);
-    if (data.projekt && o.projekt) html += riadok(data.projekt.nazov || 'Projekt', o.projekt.schvalene === true, o.projekt.poziadavka);
-    (data.body || []).forEach(function (b) { var r = (o.body || {})[String(b.id)] || {}; html += riadok(b.nazov, r.potvrdene === true, r.poziadavka); });
+    if (data.cp && o.cp) html += riadok(data.cp.nazov || 'Cenová ponuka', o.cp.schvalene === true ? 'schválené' : '', o.cp.poziadavka);
+    if (data.projekt && o.projekt) html += riadok(data.projekt.nazov || 'Projekt', o.projekt.schvalene === true ? 'schválené' : '', o.projekt.poziadavka);
+    (data.body || []).forEach(function (b) { var r = (o.body || {})[String(b.id)] || {}; html += riadok(b.nazov, odpovedText(b, r), r.poziadavka); });
     html += '</div>';
     return html;
   }
