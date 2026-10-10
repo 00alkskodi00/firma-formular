@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Schválenie – cenová ponuka, projekt, body</title>
+<style>
+  :root { --p: #2e73bf; --ok: #2e7d32; --warn: #e65100; --bg: #f4f6f9; --card: #fff; --text: #1f2933; --muted: #6b7280; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
+  .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 0 0 6px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .firma { font-size: 13px; color: var(--muted); line-height: 1.4; }
+  .firma b { color: var(--text); font-size: 15px; }
+  .req { color: var(--warn); }
+  .opt { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #d5dbe3; border-radius: 10px; margin-top: 8px; cursor: pointer; }
+  .opt:hover { border-color: var(--p); }
+  .opt input { width: 20px; height: 20px; flex: none; }
+  .opt.sel { border-color: var(--ok); background: #eef8ef; }
+  .opt.sel.rq { border-color: var(--warn); background: #fff4ea; }
+  textarea, input[type=text] { width: 100%; padding: 10px 12px; border: 1px solid #d5dbe3; border-radius: 10px; font: inherit; margin-top: 8px; }
+  textarea { min-height: 70px; resize: vertical; }
+  label.small { display: block; font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .btn { display: inline-block; border: 0; border-radius: 10px; padding: 12px 18px; font: inherit; font-weight: 600; cursor: pointer; }
+  .btn.primary { background: var(--ok); color: #fff; width: 100%; font-size: 17px; padding: 14px; }
+  .btn.ghost { background: #eef2f7; color: var(--text); }
+  .btn.file { background: #e8f0fb; color: var(--p); padding: 10px 14px; margin: 6px 6px 0 0; }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .sig { border: 1px solid #9aa5b1; border-radius: 10px; background: #fff; touch-action: none; width: 100%; height: 180px; display: block; }
+  .err { color: #b00020; font-size: 14px; margin-top: 8px; }
+  .status { padding: 10px 12px; border-radius: 10px; font-size: 14px; margin-bottom: 12px; }
+  .status.ok { background: #e6f4ea; color: #1b5e20; }
+  .status.warn { background: #fff3e0; color: #e65100; }
+  .status.info { background: #e8f0fb; color: #1b4f8a; }
+  .center { text-align: center; padding: 40px 16px; }
+  .big { font-size: 48px; }
+  .done-item { padding: 8px 0; border-bottom: 1px solid #eef0f3; font-size: 14px; }
+  .done-item b { display: block; }
+  .hidden { display: none; }
+  .sprava { white-space: pre-wrap; background: #f7f9fc; border-radius: 10px; padding: 10px 12px; margin-top: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="card center"><div class="muted">Načítavam…</div></div>
+</div>
+<script>
+(function () {
+  // Adresu Supabase a verejný (anon) kľúč doplní scripts/publish_formular.ps1 z .env.
+  var SB_URL = 'https://ctkzzqlnoyvmnkqnnnxf.supabase.co';
+  var SB_ANON = 'sb_publishable_d4LH93q4q6YtDmgkyf9Egw_gVC4EPsJ';
+  var params = new URLSearchParams(location.search);
+  var token = params.get('t') || '';
+  var app = document.getElementById('app');
+  var balik = null;   // odpoveď schvalenie_nacitaj
+  var data = null;    // snímka balíka
+  var odp = { cp: null, projekt: null, body: {} };
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function rpc(fn, body) {
+    return fetch(SB_URL + '/rest/v1/rpc/' + fn, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_ANON, 'Authorization': 'Bearer ' + SB_ANON },
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.text().then(function (t) { var j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {} return { ok: r.ok, status: r.status, j: j }; }); });
+  }
+  function showError(title, text) {
+    app.innerHTML = '<div class="card center"><div class="big">⚠️</div><h2>' + esc(title) + '</h2><div class="muted">' + esc(text) + '</div></div>';
+  }
+  function fmtDate(s) { try { return new Date(s).toLocaleString('sk-SK'); } catch (e) { return ''; } }
+  function fmtSize(b) { if (!b) return ''; return b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' kB'; }
+
+  function firmaHtml(f) {
+    if (!f || !(f.nazov || f.adresa || f.telefon || f.email || f.www)) return '';
+    var parts = [];
+    if (f.nazov) parts.push('<b>' + esc(f.nazov) + '</b>');
+    if (f.adresa) parts.push(esc(f.adresa));
+    var ids = [];
+    if (f.ico) ids.push('IČO: ' + esc(f.ico));
+    if (f.dic) ids.push('DIČ: ' + esc(f.dic));
+    if (f.icDph) ids.push('IČ DPH: ' + esc(f.icDph));
+    if (ids.length) parts.push(ids.join(' • '));
+    var k = [];
+    if (f.telefon) k.push('<a href="tel:' + esc(f.telefon.replace(/\s+/g, '')) + '">' + esc(f.telefon) + '</a>');
+    if (f.email) k.push('<a href="mailto:' + esc(f.email) + '">' + esc(f.email) + '</a>');
+    if (f.www) k.push('<a href="' + esc(/^https?:\/\//i.test(f.www) ? f.www : 'https://' + f.www) + '" target="_blank" rel="noopener">' + esc(f.www) + '</a>');
+    if (k.length) parts.push(k.join(' • '));
+    return '<div class="firma">' + parts.join('<br>') + '</div><hr style="border:0;border-top:1px solid #eef0f3;margin:10px 0">';
+  }
+
+  function hlavicka(nadpis) {
+    var z = data.zakazka || {}, zk = data.zakaznik || {};
+    var html = '<div class="card">' + firmaHtml(data.firma) + '<h1>' + esc(nadpis) + '</h1>';
+    if (z.kod || z.nazov) html += '<div class="muted" style="margin-top:6px">Zákazka: ' + esc([z.kod, z.nazov].filter(Boolean).join(' – ')) + '</div>';
+    if (zk.meno) html += '<div class="muted">Zákazník: ' + esc(zk.meno) + '</div>';
+    if (data.sprava) html += '<div class="sprava">' + esc(data.sprava) + '</div>';
+    html += '</div>';
+    return html;
+  }
+
+  // Súbory: stiahnu sa cez RPC (base64) a otvoria v novom okne.
+  window.otvorSubor = function (id, nazov, mime, btn) {
+    btn.disabled = true; var orig = btn.textContent; btn.textContent = 'Načítavam…';
+    rpc('schvalenie_subor', { p_token: token, p_id: id }).then(function (res) {
+      btn.disabled = false; btn.textContent = orig;
+      var b64 = res.j;
+      if (!res.ok || !b64) { alert('Súbor sa nepodarilo načítať. Skúste znova alebo kontaktujte firmu.'); return; }
+      var bin = atob(b64.replace(/\s/g, '')), arr = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      var blob = new Blob([arr], { type: mime || 'application/pdf' });
+      var url = URL.createObjectURL(blob);
+      var w = window.open(url, '_blank');
+      if (!w) { var a = document.createElement('a'); a.href = url; a.download = nazov; document.body.appendChild(a); a.click(); a.remove(); }
+    }).catch(function () { btn.disabled = false; btn.textContent = orig; alert('Súbor sa nepodarilo načítať.'); });
+  };
+
+  function suboryHtml(sekcia) {
+    var list = (balik.subory || []).filter(function (s) { return s.sekcia === sekcia; });
+    if (!list.length) return '<div class="muted">Bez priloženého súboru.</div>';
+    return list.map(function (s) {
+      if (s.dostupny === false) return '<div class="muted">' + esc(s.nazov) + ' (súbor už nie je dostupný online)</div>';
+      return '<button type="button" class="btn file" onclick="otvorSubor(' + Number(s.id) + ',' + JSON.stringify(String(s.nazov)).replace(/"/g, '&quot;') + ',' + JSON.stringify(String(s.mime || '')).replace(/"/g, '&quot;') + ', this)">📄 ' + esc(s.nazov) + (s.velkost ? ' <span class="muted">(' + fmtSize(s.velkost) + ')</span>' : '') + '</button>';
+    }).join('');
+  }
+
+  function sekciaHtml(key, nadpis, popis) {
+    var o = odp[key] || { schvalene: null, poziadavka: '' };
+    var html = '<div class="card" id="sek-' + key + '"><h2>' + esc(nadpis) + ' <span class="req">*</span></h2><div class="muted">' + esc(popis) + '</div><div style="margin-top:6px">' + suboryHtml(key) + '</div>';
+    html += '<label class="opt' + (o.schvalene === true ? ' sel' : '') + '"><input type="radio" name="s-' + key + '" data-s="' + key + '" data-v="ano"' + (o.schvalene === true ? ' checked' : '') + '><span>Schvaľujem</span></label>';
+    html += '<label class="opt' + (o.schvalene === false ? ' sel rq' : '') + '"><input type="radio" name="s-' + key + '" data-s="' + key + '" data-v="nie"' + (o.schvalene === false ? ' checked' : '') + '><span>Mám požiadavku / nesúhlasím</span></label>';
+    html += '<div id="rq-' + key + '" class="' + (o.schvalene === false ? '' : 'hidden') + '"><label class="small">Napíšte, čo treba zmeniť alebo doplniť <span class="req">*</span></label><textarea data-s="' + key + '" data-t="rq" placeholder="Vaša požiadavka">' + esc(o.poziadavka || '') + '</textarea></div>';
+    html += '<div class="err" id="err-' + key + '"></div></div>';
+    return html;
+  }
+
+  function bodHtml(b, i) {
+    var id = String(b.id);
+    var o = odp.body[id] || { potvrdene: null, poziadavka: '' };
+    var html = '<div class="card" id="bod-' + i + '"><h2>' + (i + 1) + '. ' + esc(b.nazov) + ' <span class="req">*</span></h2>';
+    if (b.poznamka) html += '<div class="muted">' + esc(b.poznamka) + '</div>';
+    html += '<label class="opt' + (o.potvrdene === true ? ' sel' : '') + '"><input type="radio" name="b-' + id + '" data-b="' + id + '" data-v="ano"' + (o.potvrdene === true ? ' checked' : '') + '><span>Potvrdzujem</span></label>';
+    html += '<label class="opt' + (o.potvrdene === false ? ' sel rq' : '') + '"><input type="radio" name="b-' + id + '" data-b="' + id + '" data-v="nie"' + (o.potvrdene === false ? ' checked' : '') + '><span>Mám požiadavku / inak</span></label>';
+    html += '<div id="rqb-' + id + '" class="' + (o.potvrdene === false ? '' : 'hidden') + '"><label class="small">Napíšte vašu požiadavku <span class="req">*</span></label><textarea data-b="' + id + '" data-t="rq" placeholder="Vaša požiadavka">' + esc(o.poziadavka || '') + '</textarea></div>';
+    html += '<div class="err" id="errb-' + id + '"></div></div>';
+    return html;
+  }
+
+  function renderForm() {
+    var html = hlavicka('Schválenie');
+    if (balik.stav === 'vratene' && balik.komentar_firmy) {
+      html += '<div class="card"><div class="status warn"><b>Firma vám balík vrátila s komentárom:</b><br>' + esc(balik.komentar_firmy).replace(/\n/g, '<br>') + '</div><div class="muted">Prosíme, prezrite si upravené položky a odošlite schválenie znova.</div></div>';
+    }
+    html += '<div class="card"><div class="muted">Prosíme, prezrite si priložené dokumenty, pri každej položke označte „Schvaľujem“ alebo napíšte požiadavku, podpíšte sa a stlačte „Odoslať“. Položky označené <span class="req">*</span> sú povinné.</div></div>';
+    if (data.cp) html += sekciaHtml('cp', (data.cp.nazov || 'Cenová ponuka'), 'Otvorte si cenovú ponuku a potvrďte, či s ňou súhlasíte.');
+    if (data.projekt) html += sekciaHtml('projekt', (data.projekt.nazov || 'Projekt'), 'Otvorte si projekt (výkresy, vizualizácie) a potvrďte, či s ním súhlasíte.');
+    (data.body || []).forEach(function (b, i) { html += bodHtml(b, i); });
+    var zk = data.zakaznik || {};
+    html += '<div class="card"><h2>Podpis</h2><div class="muted">Potvrdzujem, že uvedené dokumenty a body som si prezrel(a) a schvaľujem ich ako záväzné pre výrobu. Ak som uviedol(a) požiadavku, platnosť schválenia potvrdí firma.</div>';
+    html += '<label class="small">Vaše meno a priezvisko <span class="req">*</span></label><input type="text" id="meno" value="' + esc(balik.meno || zk.meno || '') + '" placeholder="Meno a priezvisko">';
+    html += '<label class="small">Podpis prstom alebo myšou <span class="req">*</span></label><canvas class="sig" id="sig"></canvas>';
+    html += '<div style="margin-top:8px"><button class="btn ghost" type="button" id="clearSig">Vymazať podpis</button></div>';
+    html += '<div class="err" id="err-final"></div>';
+    html += '<div style="margin-top:14px"><button class="btn primary" type="button" id="submit">Odoslať schválenie</button></div></div>';
+    app.innerHTML = html;
+
+    app.addEventListener('change', function (e) {
+      var t = e.target; if (!t || !t.dataset) return;
+      if (t.dataset.s && t.type === 'radio') {
+        var o = odp[t.dataset.s] || (odp[t.dataset.s] = { schvalene: null, poziadavka: '' });
+        o.schvalene = t.dataset.v === 'ano';
+        document.getElementById('rq-' + t.dataset.s).classList.toggle('hidden', o.schvalene);
+        if (o.schvalene) { o.poziadavka = ''; var ta = app.querySelector('textarea[data-s="' + t.dataset.s + '"]'); if (ta) ta.value = ''; }
+      }
+      if (t.dataset.b && t.type === 'radio') {
+        var ob = odp.body[t.dataset.b] || (odp.body[t.dataset.b] = { potvrdene: null, poziadavka: '' });
+        ob.potvrdene = t.dataset.v === 'ano';
+        document.getElementById('rqb-' + t.dataset.b).classList.toggle('hidden', ob.potvrdene);
+        if (ob.potvrdene) { ob.poziadavka = ''; var tb = app.querySelector('textarea[data-b="' + t.dataset.b + '"]'); if (tb) tb.value = ''; }
+      }
+      if (t.type === 'radio' && t.name) {
+        Array.prototype.forEach.call(app.querySelectorAll('input[name="' + t.name + '"]'), function (inp) {
+          inp.parentNode.classList.toggle('sel', inp.checked);
+          inp.parentNode.classList.toggle('rq', inp.checked && inp.dataset.v === 'nie');
+        });
+      }
+    });
+    app.addEventListener('input', function (e) {
+      var t = e.target; if (!t || !t.dataset || t.dataset.t !== 'rq') return;
+      if (t.dataset.s) { (odp[t.dataset.s] || (odp[t.dataset.s] = { schvalene: false, poziadavka: '' })).poziadavka = t.value; }
+      if (t.dataset.b) { (odp.body[t.dataset.b] || (odp.body[t.dataset.b] = { potvrdene: false, poziadavka: '' })).poziadavka = t.value; }
+    });
+    setupSignature();
+    document.getElementById('submit').addEventListener('click', submit);
+  }
+
+  var sigCanvas, sigCtx, drawing = false, hasSig = false, last = null;
+  function setupSignature() {
+    sigCanvas = document.getElementById('sig');
+    var ratio = window.devicePixelRatio || 1;
+    var w = sigCanvas.clientWidth, h = sigCanvas.clientHeight;
+    sigCanvas.width = Math.round(w * ratio); sigCanvas.height = Math.round(h * ratio);
+    sigCtx = sigCanvas.getContext('2d');
+    sigCtx.scale(ratio, ratio);
+    sigCtx.lineWidth = 2.5; sigCtx.lineCap = 'round'; sigCtx.lineJoin = 'round';
+    sigCtx.fillStyle = '#fff'; sigCtx.fillRect(0, 0, w, h);
+    sigCtx.strokeStyle = '#d5dbe3'; sigCtx.beginPath(); sigCtx.moveTo(16, h - 36); sigCtx.lineTo(w - 16, h - 36); sigCtx.stroke();
+    sigCtx.strokeStyle = '#111';
+    function pos(e) { var r = sigCanvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    sigCanvas.onpointerdown = function (e) { e.preventDefault(); drawing = true; last = pos(e); sigCanvas.setPointerCapture(e.pointerId); };
+    sigCanvas.onpointermove = function (e) { if (!drawing) return; e.preventDefault(); var p = pos(e); sigCtx.beginPath(); sigCtx.moveTo(last.x, last.y); sigCtx.lineTo(p.x, p.y); sigCtx.stroke(); last = p; hasSig = true; };
+    sigCanvas.onpointerup = sigCanvas.onpointercancel = sigCanvas.onpointerleave = function () { drawing = false; };
+    document.getElementById('clearSig').onclick = function () { hasSig = false; setupSignature(); };
+  }
+
+  function validate() {
+    var ok = true, first = null;
+    function fail(elId, errId, msg) { var e = document.getElementById(errId); if (e) e.textContent = msg; if (!first) first = document.getElementById(elId); ok = false; }
+    function clear(errId) { var e = document.getElementById(errId); if (e) e.textContent = ''; }
+    ['cp', 'projekt'].forEach(function (k) {
+      if (!data[k]) return;
+      var o = odp[k];
+      if (!o || o.schvalene === null || o.schvalene === undefined) return fail('sek-' + k, 'err-' + k, 'Označte „Schvaľujem“ alebo napíšte požiadavku.');
+      if (o.schvalene === false && !(o.poziadavka || '').trim()) return fail('sek-' + k, 'err-' + k, 'Napíšte, prosím, vašu požiadavku.');
+      clear('err-' + k);
+    });
+    (data.body || []).forEach(function (b, i) {
+      var id = String(b.id), o = odp.body[id];
+      if (!o || o.potvrdene === null || o.potvrdene === undefined) return fail('bod-' + i, 'errb-' + id, 'Označte „Potvrdzujem“ alebo napíšte požiadavku.');
+      if (o.potvrdene === false && !(o.poziadavka || '').trim()) return fail('bod-' + i, 'errb-' + id, 'Napíšte, prosím, vašu požiadavku.');
+      clear('errb-' + id);
+    });
+    var fin = document.getElementById('err-final');
+    var meno = document.getElementById('meno').value.trim();
+    if (ok && !meno) { fin.textContent = 'Zadajte, prosím, svoje meno.'; return false; }
+    if (ok && !hasSig) { fin.textContent = 'Podpíšte sa, prosím, do rámčeka.'; return false; }
+    fin.textContent = '';
+    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return ok;
+  }
+
+  function submit() {
+    if (!validate()) return;
+    var btn = document.getElementById('submit');
+    btn.disabled = true; btn.textContent = 'Odosielam…';
+    var podpis = sigCanvas.toDataURL('image/png').split(',')[1];
+    var meno = document.getElementById('meno').value.trim();
+    var payload = { body: odp.body };
+    if (data.cp) payload.cp = odp.cp;
+    if (data.projekt) payload.projekt = odp.projekt;
+    rpc('schvalenie_odosli', { p_token: token, p_odpovede: payload, p_podpis: podpis, p_meno: meno })
+      .then(function (res) {
+        var j = res.j || {};
+        if (!res.ok || !j.ok) { throw new Error(j.error || (j.message ? j.message : 'Odoslanie zlyhalo')); }
+        balik.stav = j.stav; balik.meno = meno; balik.odoslane_at = new Date().toISOString(); balik.odpovede = payload;
+        renderDone();
+        window.scrollTo(0, 0);
+      })
+      .catch(function (e) {
+        btn.disabled = false; btn.textContent = 'Odoslať schválenie';
+        document.getElementById('err-final').textContent = 'Nepodarilo sa odoslať: ' + e.message + '. Skúste to, prosím, znova.';
+      });
+  }
+
+  function zhrnutie() {
+    var o = balik.odpovede || {};
+    var html = '<div class="card"><h2>Zhrnutie</h2>';
+    function riadok(nazov, schv, rq) {
+      return '<div class="done-item"><b>' + esc(nazov) + '</b>' + (schv ? '✅ schválené' : '✋ požiadavka') + (rq ? '<div class="muted">' + esc(rq) + '</div>' : '') + '</div>';
+    }
+    if (data.cp && o.cp) html += riadok(data.cp.nazov || 'Cenová ponuka', o.cp.schvalene === true, o.cp.poziadavka);
+    if (data.projekt && o.projekt) html += riadok(data.projekt.nazov || 'Projekt', o.projekt.schvalene === true, o.projekt.poziadavka);
+    (data.body || []).forEach(function (b) { var r = (o.body || {})[String(b.id)] || {}; html += riadok(b.nazov, r.potvrdene === true, r.poziadavka); });
+    html += '</div>';
+    return html;
+  }
+
+  function renderDone() {
+    var html = hlavicka('Schválenie');
+    var s = balik.stav;
+    if (s === 'schvalene') {
+      html += '<div class="card center"><div class="big">✅</div><h2>Schválené</h2><div class="muted">Ďakujeme' + (balik.meno ? ', ' + esc(balik.meno) : '') + '. ' + (balik.rozhodnute_at ? 'Potvrdené firmou ' + esc(fmtDate(balik.rozhodnute_at)) + '.' : '') + '</div></div>';
+    } else if (s === 'caka_na_schvalenie') {
+      html += '<div class="card center"><div class="big">📨</div><h2>Ďakujeme, odoslané</h2><div class="muted">Vaša požiadavka čaká na vyjadrenie firmy. Ozveme sa vám.' + (balik.odoslane_at ? ' Odoslané ' + esc(fmtDate(balik.odoslane_at)) + '.' : '') + '</div></div>';
+    } else {
+      html += '<div class="card center"><div class="big">✅</div><h2>Ďakujeme, schválenie je odoslané</h2><div class="muted">Firma dostala vaše schválenie automaticky.' + (balik.odoslane_at ? ' Odoslané ' + esc(fmtDate(balik.odoslane_at)) + '.' : '') + ' Túto stránku môžete zavrieť.</div></div>';
+    }
+    html += zhrnutie();
+    app.innerHTML = html;
+  }
+
+  if (!token) { showError('Chýba odkaz', 'Otvorte, prosím, odkaz, ktorý ste dostali od firmy.'); return; }
+  if (SB_URL.indexOf('__') === 0) { showError('Stránka nie je nastavená', 'Chýba adresa servera – stránku treba nasadiť skriptom publish_formular.ps1.'); return; }
+  rpc('schvalenie_nacitaj', { p_token: token })
+    .then(function (res) {
+      if (!res.ok) { showError('Stránka sa nedá načítať', 'Skúste to, prosím, neskôr (HTTP ' + res.status + ').'); return; }
+      balik = res.j;
+      if (!balik) { showError('Odkaz sa nenašiel', 'Skontrolujte, prosím, odkaz, alebo požiadajte firmu o nový.'); return; }
+      if (balik.stav === 'expirovane') { showError('Platnosť odkazu vypršala', 'Požiadajte firmu o nový odkaz.'); return; }
+      data = balik.data || {};
+      var o = balik.odpovede || {};
+      odp = { cp: o.cp || null, projekt: o.projekt || null, body: o.body || {} };
+      if (balik.stav === 'otvorene' || balik.stav === 'vratene') { renderForm(); return; }
+      renderDone();
+    })
+    .catch(function () { showError('Stránka sa nedá načítať', 'Skontrolujte pripojenie na internet a skúste znova.'); });
+})();
+</script>
+</body>
+</html>

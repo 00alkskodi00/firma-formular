@@ -61,7 +61,8 @@
   var odpovede = {};
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  function img(b64, cls) { if (!b64) return ''; return '<img class="' + cls + '" src="data:image/*;base64,' + b64 + '" alt="" onclick="showImg(this.src)">'; }
+  // Len čisté base64 – hodnota zo snímky ide do atribútu (ochrana pred XSS).
+  function img(b64, cls) { if (!b64 || !/^[A-Za-z0-9+\/=\s]+$/.test(b64)) return ''; return '<img class="' + esc(cls) + '" src="data:image/*;base64,' + b64.replace(/\s/g, '') + '" alt="" onclick="showImg(this.src)">'; }
   window.showImg = function (src) { document.getElementById('overlayImg').src = src; document.getElementById('overlay').classList.add('show'); };
 
   function showError(title, text) {
@@ -131,7 +132,7 @@
         var type = p.typ === 'vyber' ? 'radio' : 'checkbox';
         (p.moznosti || []).forEach(function (m) {
           var checked = o.vybrane.indexOf(m.id) >= 0;
-          html += '<label class="opt' + (checked ? ' sel' : '') + '"><input type="' + type + '" name="p' + i + '" value="' + esc(m.id) + '"' + (checked ? ' checked' : '') + ' data-p="' + esc(p.id) + '" data-m="' + esc(m.id) + '" data-t="' + p.typ + '">' + img(m.obrazok, '') + '<span>' + esc(m.nazov) + '</span></label>';
+          html += '<label class="opt' + (checked ? ' sel' : '') + '"><input type="' + type + '" name="p' + i + '" value="' + esc(m.id) + '"' + (checked ? ' checked' : '') + ' data-p="' + esc(p.id) + '" data-m="' + esc(m.id) + '" data-t="' + esc(p.typ) + '">' + img(m.obrazok, '') + '<span>' + esc(m.nazov) + '</span></label>';
         });
         html += '<div class="muted" style="margin-top:6px;font-size:12px">' + (p.typ === 'vyber' ? 'Vyberte jednu možnosť.' : 'Môžete vybrať viac možností.') + '</div>';
       } else if (p.typ === 'anoNie') {
