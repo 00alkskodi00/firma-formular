@@ -84,7 +84,9 @@
   function fmtSize(b) { if (!b) return ''; return b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' kB'; }
 
   function firmaHtml(f) {
-    if (!f || !(f.nazov || f.adresa || f.telefon || f.email || f.www)) return '';
+    if (!f || !(f.nazov || f.adresa || f.telefon || f.email || f.www || f.facebook || f.instagram || f.logo)) return '';
+    // Logo firmy (base64 PNG z nastavení firmy) – len bezpečné znaky base64.
+    var logo = f.logo ? '<img src="data:image/png;base64,' + String(f.logo).replace(/[^A-Za-z0-9+/=]/g, '') + '" alt="" style="max-height:52px;max-width:220px;display:block;margin-bottom:6px">' : '';
     var parts = [];
     if (f.nazov) parts.push('<b>' + esc(f.nazov) + '</b>');
     if (f.adresa) parts.push(esc(f.adresa));
@@ -98,7 +100,11 @@
     if (f.email) k.push('<a href="mailto:' + esc(f.email) + '">' + esc(f.email) + '</a>');
     if (f.www) k.push('<a href="' + esc(/^https?:\/\//i.test(f.www) ? f.www : 'https://' + f.www) + '" target="_blank" rel="noopener">' + esc(f.www) + '</a>');
     if (k.length) parts.push(k.join(' • '));
-    return '<div class="firma">' + parts.join('<br>') + '</div><hr style="border:0;border-top:1px solid #eef0f3;margin:10px 0">';
+    var soc = [];
+    if (f.facebook) soc.push('Facebook: ' + esc(f.facebook));
+    if (f.instagram) soc.push('Instagram: ' + esc(f.instagram));
+    if (soc.length) parts.push(soc.join(' • '));
+    return '<div class="firma">' + logo + parts.join('<br>') + '</div><hr style="border:0;border-top:1px solid #eef0f3;margin:10px 0">';
   }
 
   function hlavicka(nadpis) {
@@ -136,6 +142,17 @@
     }).join('');
   }
 
+  // Prílohy bodu (fotky, PDF) – len ak nejaké sú.
+  function suboryBoduHtml(bodId) {
+    var list = (balik.subory || []).filter(function (s) { return s.sekcia === 'bod' && String(s.bod_id) === String(bodId); });
+    if (!list.length) return '';
+    return '<div style="margin-top:6px">' + list.map(function (s) {
+      if (s.dostupny === false) return '<div class="muted">' + esc(s.nazov) + ' (súbor už nie je dostupný online)</div>';
+      var ikona = String(s.mime || '').indexOf('image/') === 0 ? '🖼️ ' : '📎 ';
+      return '<button type="button" class="btn file" onclick="otvorSubor(' + Number(s.id) + ',' + JSON.stringify(String(s.nazov)).replace(/"/g, '&quot;') + ',' + JSON.stringify(String(s.mime || '')).replace(/"/g, '&quot;') + ', this)">' + ikona + esc(s.nazov) + (s.velkost ? ' <span class="muted">(' + fmtSize(s.velkost) + ')</span>' : '') + '</button>';
+    }).join('') + '</div>';
+  }
+
   function sekciaHtml(key, nadpis, popis) {
     var o = odp[key] || { schvalene: null, poziadavka: '' };
     var html = '<div class="card" id="sek-' + key + '"><h2>' + esc(nadpis) + ' <span class="req">*</span></h2><div class="muted">' + esc(popis) + '</div><div style="margin-top:6px">' + suboryHtml(key) + '</div>';
@@ -162,6 +179,7 @@
     var html = '<div class="card" id="bod-' + i + '"><div class="item-head"><div class="txt"><h2>' + (i + 1) + '. ' + esc(b.nazov) + (b.povinne === false ? '' : ' <span class="req">*</span>') + '</h2>';
     if (b.poznamka) html += '<div class="muted">' + esc(b.poznamka) + '</div>';
     html += '</div>' + img(b.obrazok, 'item-img') + '</div>';
+    html += suboryBoduHtml(b.id);
     if (typ === 'potvrdenie') {
       html += '<label class="opt' + (o.potvrdene === true ? ' sel' : '') + '"><input type="radio" name="b-' + id + '" data-b="' + id + '" data-v="ano"' + (o.potvrdene === true ? ' checked' : '') + '><span>Potvrdzujem</span></label>';
       html += '<label class="opt' + (o.potvrdene === false ? ' sel rq' : '') + '"><input type="radio" name="b-' + id + '" data-b="' + id + '" data-v="nie"' + (o.potvrdene === false ? ' checked' : '') + '><span>Mám požiadavku / inak</span></label>';
